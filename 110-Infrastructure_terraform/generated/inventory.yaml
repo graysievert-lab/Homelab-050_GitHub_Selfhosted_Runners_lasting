@@ -1,0 +1,5 @@
+all:
+  hosts:
+    gha-1:
+      ansible_host: gha-1.lan
+      ansible_user: rocky

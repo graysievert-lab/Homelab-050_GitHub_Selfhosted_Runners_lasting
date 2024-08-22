@@ -1,0 +1,84 @@
+- name: Install GitHub Actions Runner
+  hosts: all
+  become: true
+  
+  vars:
+    # runner_state: "absent"  
+    runner_state: "started"  # State in which the runner service will be after the role is done (started, stopped, absent)
+    runner_org: true # Is it the runner for organization?
+    reinstall_runner: true # If found on the server, delete already existing runner service and install it again
+
+    github_account: graysievert-lab # GitHub Repository user or Organization owner used for Runner registration
+    access_token: "{{ lookup('community.hashi_vault.vault_kv2_get', 'infra-gha/selfhosted_runners', engine_mount_point='secret').secret.PERSONAL_ACCESS_TOKEN }}"
+    hide_sensitive_logs: true # Do not show Ansible logs which may contain sensitive data (registration token)
+
+    runner_user: rocky # Runner user - user under which is the local runner service running
+    runner_dir: /opt/actions-runner # Directory where the local runner will be installed
+    runner_version: "latest" # Version of the GitHub Actions Runner
+
+    custom_env: | # Configuring a custom .env file
+      ACTIONS_RUNNER_HOOK_JOB_STARTED={{ runner_dir }}/pre_cleanup_script.sh
+      ACTIONS_RUNNER_HOOK_JOB_COMPLETED={{ runner_dir }}/post_cleanup_script.sh
+
+##########################
+  
+  roles:
+    - role: monolithprojects.github_actions_runner # install runner
+
+##########################
+  tasks:  
+    - name: Create cleanup script for ACTIONS_RUNNER_HOOK_JOB_STARTED 
+      ansible.builtin.copy:
+        dest: "{{ runner_dir }}/pre_cleanup_script.sh"
+        owner: "{{ runner_user }}"
+        group: "{{ runner_user }}"
+        mode: '0700'
+        content: |
+          #!/bin/bash
+
+          if [ -z "$GITHUB_WORKSPACE" ]; then
+            echo "Error: GITHUB_WORKSPACE is not set."
+            exit 1
+          fi
+
+          echo "Deleating remnants (if any) from previous runs in $GITHUB_WORKSPACE ..."
+          rm -rf "$GITHUB_WORKSPACE"/{,.[!.],..?}*
+
+          if [ $? -eq 0 ]; then
+            echo "Files deleted successfully."
+          else
+            echo "Error: Failed to delete files."
+            exit 1
+          fi
+        
+    - name: Create cleanup script for ACTIONS_RUNNER_HOOK_JOB_COMPLETED
+      ansible.builtin.copy:
+        dest: "{{ runner_dir }}/post_cleanup_script.sh"
+        owner: "{{ runner_user }}"
+        group: "{{ runner_user }}"
+        mode: '0700'
+        content: |
+          #!/bin/bash
+
+          if [ -z "$GITHUB_WORKSPACE" ]; then
+            echo "Error: GITHUB_WORKSPACE is not set."
+            exit 1
+          fi
+
+          UP_TWO_LEVELS="$(dirname "$(dirname "$GITHUB_WORKSPACE")")"
+
+          echo "Deleting $UP_TWO_LEVELS and its contents..."
+          rm -rf "$UP_TWO_LEVELS"
+
+          if [ $? -eq 0 ]; then
+            echo "$UP_TWO_LEVELS deleted successfully."
+          else
+            echo "Error: Failed to delete files and directory."
+            exit 1
+          fi
+
+    - name: Install additional packages
+      ansible.builtin.package:
+        name:
+          - git
+        state: latest

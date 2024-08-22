@@ -1,0 +1,9 @@
+collections:
+  - name: community.general
+  - name: ansible.posix
+  - name: community.hashi_vault
+
+roles:
+  - name: monolithprojects.github_actions_runner
+    version: 1.22.0
+    src: https://github.com/MonolithProjects/ansible-github_actions_runner
